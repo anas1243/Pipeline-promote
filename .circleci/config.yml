@@ -1,0 +1,71 @@
+version: 2.1
+
+jobs:
+  create-deploy-frontend:
+    docker:
+      - image: amazon/aws-cli
+    steps:
+      - checkout
+      - run:
+          name: Create and Deploy Front-end
+          command: |
+            aws cloudformation deploy \
+            --template-file bucket.yml \
+            --stack-name mybucket-"${CIRCLE_WORKFLOW_ID}" \
+            --parameter-overrides MyBucketName="${CIRCLE_WORKFLOW_ID}"
+
+      - run: aws s3 sync frontend/ "s3://${CIRCLE_WORKFLOW_ID}" --delete
+  get_last_deployment_id:
+    docker:
+      - image: amazon/aws-cli
+    steps:
+      - checkout
+      - run: yum install -y tar gzip
+      - run:
+          name: Fetch and save the old pipeline ID (bucket name) responsible for the last release.
+          command: |
+            aws cloudformation \
+            list-exports --query "Exports[?Name==\`PipelineID\`].Value" \
+            --no-paginate --output text > ~/textfile.txt
+      - persist_to_workspace:
+          root: ~/
+          paths:
+            - textfile.txt
+
+  promote-to-production:
+    docker:
+      - image: amazon/aws-cli
+    steps:
+      - checkout
+      - run:
+          name: Promote to produbction
+          command: |
+            aws cloudformation deploy \
+            --template-file cloudfront.yml \
+            --stack-name production-distro \
+            --parameter-overrides PipelineID="${CIRCLE_WORKFLOW_ID}"
+
+  clean_up_old_front_end:
+    docker:
+      - image: amazon/aws-cli
+    steps:
+      - checkout
+      - run: yum install -y tar gzip
+      - attach_workspace:
+          at: ~/
+      - run:
+          name: Destroy the previous S3 bucket and CloudFormation stack.
+          command: |
+            aws s3 rm "s3://${OldBucketID}" --recursive
+workflows:
+  CD:
+    jobs:
+      - create-deploy-frontend
+      - get_last_deployment_id
+      - promote-to-production:
+          requires:
+            - create-deploy-frontend
+      - clean_up_old_front_end:
+          requires:
+            - create-deploy-frontend
+            - promote-to-production
