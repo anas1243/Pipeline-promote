@@ -27,6 +27,7 @@ jobs:
             aws cloudformation \
             list-exports --query "Exports[?Name==\`PipelineID\`].Value" \
             --no-paginate --output text > ~/textfile.txt
+            cat ~/textfile.txt
       - persist_to_workspace:
           root: ~/
           paths:
@@ -50,12 +51,15 @@ jobs:
       - image: amazon/aws-cli
     steps:
       - checkout
-      - run: yum install -y tar gzip
+      - run: |
+          yum install -y tar gzip
       - attach_workspace:
           at: ~/
       - run:
           name: Destroy the previous S3 bucket and CloudFormation stack.
           command: |
+            export OldBucketID=$(cat ~/textfile.txt)
+            cat ~/textfile.txt
             aws s3 rm "s3://${OldBucketID}" --recursive
 workflows:
   CD:
@@ -69,3 +73,4 @@ workflows:
           requires:
             - create-deploy-frontend
             - promote-to-production
+            - get_last_deployment_id
